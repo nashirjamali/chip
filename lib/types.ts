@@ -52,6 +52,7 @@ export type OcrResult = {
   taxCents: number;
   tipCents: number;
   totalCents: number;
+  currencyCode?: string;
 };
 
 export type ChainConfig = {

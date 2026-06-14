@@ -3,14 +3,13 @@
 import { WalletButton } from "@/app/components/app/WalletButton";
 import { useChainConfig } from "@/app/components/app/useChainConfig";
 import { usdcToUnits } from "@/lib/chain";
-import { formatUsd } from "@/lib/split";
+import { formatUsd, shortenAddress } from "@/lib/split";
 import type { Participant, Split } from "@/lib/types";
 import { useParams, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { erc20Abi } from "viem";
 import {
   useAccount,
-  useConnect,
   usePublicClient,
   useWriteContract,
 } from "wagmi";
@@ -23,7 +22,6 @@ function PayPageContent() {
   const publicClient = usePublicClient();
 
   const { address, isConnected } = useAccount();
-  const { connect, connectors } = useConnect();
   const { writeContractAsync } = useWriteContract();
 
   const [split, setSplit] = useState<Split | null>(null);
@@ -31,6 +29,9 @@ function PayPageContent() {
   const [error, setError] = useState("");
   const [paying, setPaying] = useState(false);
   const [paid, setPaid] = useState(false);
+
+  const demoPayments = chainConfig?.demoPayments ?? false;
+  const walletReady = demoPayments || isConnected;
 
   const loadSplit = useCallback(async () => {
     const response = await fetch(`/api/splits/${params.id}`);
@@ -79,12 +80,12 @@ function PayPageContent() {
   }
 
   async function handlePay() {
-    if (!participant || !split || !chainConfig) return;
+    if (!participant || !split || !chainConfig || !walletReady) return;
     setError("");
     setPaying(true);
 
     try {
-      if (chainConfig.demoPayments) {
+      if (demoPayments) {
         const response = await fetch(`/api/splits/${params.id}/pay`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -99,11 +100,7 @@ function PayPageContent() {
         return;
       }
 
-      if (!isConnected || !address) {
-        const connector = connectors[0];
-        if (connector) connect({ connector });
-        return;
-      }
+      if (!address) return;
 
       const hash = await writeContractAsync({
         address: chainConfig.usdcAddress as `0x${string}`,
@@ -131,8 +128,11 @@ function PayPageContent() {
 
   if (error && !split) {
     return (
-      <main className="flex flex-1 flex-col px-4 py-6">
-        <p className="app-error">{error}</p>
+      <main className="flex flex-1 flex-col justify-center px-4 py-6">
+        <div className="brutal bg-card p-4 text-center">
+          <p className="m-0 font-semibold text-ink">Link unavailable</p>
+          <p className="app-error mt-2 mb-0">{error}</p>
+        </div>
       </main>
     );
   }
@@ -145,66 +145,105 @@ function PayPageContent() {
     );
   }
 
+  if (paid) {
+    return (
+      <main className="flex flex-1 flex-col justify-center px-4 py-6">
+        <div className="text-center">
+          <p className="mb-2 font-[family-name:var(--font-display)] text-3xl font-extrabold text-ink text-balance">
+            You&apos;re settled with {split.organizerName} ✓
+          </p>
+          <p className="m-0 text-sm text-muted">
+            {formatUsd(participant.amountCents)} sent — you&apos;re done.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="flex flex-1 flex-col">
-      <div className="flex flex-1 flex-col justify-center px-4 py-6">
-        {paid ? (
-          <div className="text-center">
-            <p className="mb-2 font-[family-name:var(--font-display)] text-3xl font-extrabold text-ink">
-              You&apos;re settled with {split.organizerName} ✓
+      <div className="flex flex-1 flex-col px-4 py-6">
+        <div className="brutal mb-6 bg-surface-blue p-4 text-center">
+          <p className="mb-2 text-sm font-medium text-muted">
+            {split.organizerName} is asking for
+          </p>
+          <p className="mb-1 font-[family-name:var(--font-display)] text-5xl font-extrabold tabular-nums text-ink">
+            {formatUsd(participant.amountCents)}
+          </p>
+          <p className="m-0 text-sm text-muted">
+            of {formatUsd(split.totalCents)} total
+          </p>
+        </div>
+
+        {!demoPayments && (
+          <div className="brutal mb-6 bg-card p-4">
+            <p className="app-label mb-1">
+              {isConnected ? "Wallet connected" : "Step 1 · Connect wallet"}
             </p>
-            <p className="text-sm text-muted">
-              {formatUsd(participant.amountCents)} sent — you&apos;re done.
-            </p>
-          </div>
-        ) : (
-          <>
-            <p className="mb-2 text-center text-sm font-medium text-muted">
-              {split.organizerName} is asking for
-            </p>
-            <p className="mb-1 text-center font-[family-name:var(--font-display)] text-5xl font-extrabold tabular-nums text-ink">
-              {formatUsd(participant.amountCents)}
-            </p>
-            <p className="mb-4 text-center text-sm text-muted">
-              of {formatUsd(split.totalCents)} total
-            </p>
-            {chainConfig?.demoPayments ? (
-              <p className="mb-4 text-center text-xs text-muted">
-                Demo mode — no real USDC transfer
-              </p>
+            {isConnected && address ? (
+              <>
+                <p className="m-0 text-sm text-muted text-pretty">
+                  You&apos;re ready to pay {formatUsd(participant.amountCents)} in
+                  USDC on Sepolia.
+                </p>
+                <div className="mt-4 flex items-center justify-between gap-3">
+                  <p className="m-0 font-mono text-sm font-semibold tabular-nums text-ink">
+                    {shortenAddress(address)}
+                  </p>
+                  <WalletButton connectLabel="Connect wallet" />
+                </div>
+              </>
             ) : (
-              <p className="mb-4 text-center text-xs text-muted">
-                Pays in USDC on Sepolia testnet
-              </p>
+              <>
+                <p className="m-0 text-sm text-muted text-pretty">
+                  Connect a wallet before paying. MetaMask, Coinbase Wallet, and
+                  other browser wallets work here.
+                </p>
+                <div className="mt-4">
+                  <WalletButton
+                    fullWidth
+                    connectLabel="Connect wallet"
+                  />
+                </div>
+              </>
             )}
-            {!isConnected && !chainConfig?.demoPayments && (
-              <div className="mb-4 flex justify-center">
-                <WalletButton />
-              </div>
-            )}
-            {error && <p className="app-error mb-4">{error}</p>}
-          </>
+          </div>
         )}
+
+        {demoPayments && (
+          <p className="mb-6 text-center text-xs text-muted">
+            Demo mode — no real USDC transfer
+          </p>
+        )}
+
+        {!demoPayments && walletReady && (
+          <p className="mb-6 text-center text-sm font-medium text-ink">
+            Step 2 · Pay your share
+          </p>
+        )}
+
+        {error && <p className="app-error mb-4">{error}</p>}
       </div>
 
-      {!paid && (
-        <div className="sticky bottom-0 border-t-[3px] border-ink bg-card p-4">
-          <button
-            type="button"
-            onClick={handlePay}
-            disabled={paying}
-            className="brutal-btn brutal-btn-primary app-btn-full text-lg"
-          >
-            {paying
-              ? "Processing…"
-              : chainConfig?.demoPayments
-                ? "Pay"
-                : isConnected
-                  ? "Pay with USDC"
-                  : "Connect wallet"}
-          </button>
-        </div>
-      )}
+      <div className="sticky bottom-0 border-t-[3px] border-ink bg-card p-4">
+        <button
+          type="button"
+          onClick={handlePay}
+          disabled={paying || !walletReady}
+          className="brutal-btn brutal-btn-primary app-btn-full text-lg"
+        >
+          {paying
+            ? "Processing…"
+            : walletReady
+              ? `Pay ${formatUsd(participant.amountCents)}`
+              : "Connect wallet to pay"}
+        </button>
+        {!walletReady && !demoPayments && (
+          <p className="m-0 mt-2 text-center text-xs text-muted">
+            Connect your wallet above to unlock payment.
+          </p>
+        )}
+      </div>
     </main>
   );
 }

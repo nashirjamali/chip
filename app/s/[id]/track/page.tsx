@@ -1,17 +1,26 @@
 "use client";
 
-import { QrCode } from "@/app/components/app/QrCode";
-import { ShareButton } from "@/app/components/app/ShareButton";
+import { ShareSheet } from "@/app/components/app/ShareSheet";
 import { useChainConfig } from "@/app/components/app/useChainConfig";
 import {
   formatUsd,
   participantPayUrl,
   shortenAddress,
 } from "@/lib/split";
-import type { Split } from "@/lib/types";
+import type { Participant, Split } from "@/lib/types";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+
+type ShareTarget = {
+  url: string;
+  text: string;
+  name: string;
+};
+
+function nudgeMessage(split: Split, participant: Participant) {
+  return `Hey ${participant.name}, ${split.organizerName} is waiting on ${formatUsd(participant.amountCents)} for the bill. Tap to pay your share`;
+}
 
 export default function TrackPage() {
   const params = useParams<{ id: string }>();
@@ -19,9 +28,8 @@ export default function TrackPage() {
   const [split, setSplit] = useState<Split | null>(null);
   const [error, setError] = useState("");
   const [origin, setOrigin] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
   const [nudgeError, setNudgeError] = useState("");
-  const [nudgedId, setNudgedId] = useState<string | null>(null);
   const [nudgingId, setNudgingId] = useState<string | null>(null);
 
   const loadSplit = useCallback(async () => {
@@ -41,55 +49,39 @@ export default function TrackPage() {
     return () => clearInterval(interval);
   }, [loadSplit]);
 
-  const shareUrl = origin ? `${origin}/s/${params.id}` : "";
-  const shareText = split
-    ? `${split.organizerName} is collecting ${formatUsd(split.totalCents)} — tap to pay your share`
-    : "";
+  async function handleNudge(participant: Participant) {
+    if (!split || !origin) return;
 
-  async function copyShareLink() {
-    if (!shareUrl) return;
-    await navigator.clipboard.writeText(`${shareText}\n${shareUrl}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
-  async function handleNudge(participantId: string) {
     setNudgeError("");
-    setNudgingId(participantId);
+    const payUrl = participantPayUrl(origin, split.id, participant.id);
+    setShareTarget({
+      url: payUrl,
+      text: nudgeMessage(split, participant),
+      name: participant.name,
+    });
+
+    if (!canNudge(participant)) return;
+
+    setNudgingId(participant.id);
 
     const response = await fetch(`/api/splits/${params.id}/nudge`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ participantId }),
+      body: JSON.stringify({ participantId: participant.id }),
     });
 
     setNudgingId(null);
 
     if (!response.ok) {
       const data = await response.json();
-      setNudgeError(data.error ?? "Could not send nudge");
+      if (response.status !== 429) {
+        setNudgeError(data.error ?? "Could not send nudge");
+      }
       return;
     }
 
     const data = await response.json();
     setSplit(data.split);
-    setNudgedId(participantId);
-
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: "Chip",
-          text: data.message,
-          url: data.payUrl,
-        });
-      } catch {
-        await navigator.clipboard.writeText(data.message);
-      }
-    } else {
-      await navigator.clipboard.writeText(data.message);
-    }
-
-    setTimeout(() => setNudgedId(null), 2500);
   }
 
   function canNudge(participant: Split["participants"][number]) {
@@ -153,30 +145,6 @@ export default function TrackPage() {
           )}
         </div>
 
-        {!allPaid && shareUrl && (
-          <div className="brutal mb-6 bg-surface-blue p-4">
-            <p className="mb-3 font-semibold text-ink">Share with the group</p>
-            <div className="mb-4 flex gap-2">
-              <ShareButton
-                url={shareUrl}
-                title="Chip"
-                text={shareText}
-                className="brutal-btn brutal-btn-primary flex-1 text-sm"
-              >
-                Share link
-              </ShareButton>
-              <button
-                type="button"
-                onClick={copyShareLink}
-                className="brutal-btn brutal-btn-secondary flex-1 text-sm"
-              >
-                {copied ? "Copied!" : "Copy"}
-              </button>
-            </div>
-            <QrCode value={shareUrl} label="Friends can scan to pay" />
-          </div>
-        )}
-
         {allPaid && (
           <div className="brutal mb-6 bg-surface p-4 text-center">
             <p className="m-0 font-semibold text-ink">
@@ -188,13 +156,7 @@ export default function TrackPage() {
         {nudgeError && <p className="app-error mb-4">{nudgeError}</p>}
 
         <ul className="m-0 space-y-3 p-0">
-          {split.participants.map((participant, index) => {
-            const payUrl =
-              origin && index !== 0
-                ? participantPayUrl(origin, split.id, participant.id)
-                : "";
-
-            return (
+          {split.participants.map((participant, index) => (
               <li key={participant.id} className="brutal bg-card p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
@@ -209,17 +171,6 @@ export default function TrackPage() {
                     <p className="m-0 mt-0.5 text-sm tabular-nums text-muted">
                       {formatUsd(participant.amountCents)}
                     </p>
-                    {payUrl && participant.status === "pending" && (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          await navigator.clipboard.writeText(payUrl);
-                        }}
-                        className="mt-1 text-xs font-semibold text-ink underline-offset-4 hover:underline"
-                      >
-                        Copy personal link
-                      </button>
-                    )}
                     {participant.txHash && chainConfig && (
                       <a
                         href={`${chainConfig.explorerUrl}/tx/${participant.txHash}`}
@@ -245,24 +196,29 @@ export default function TrackPage() {
                 {participant.status === "pending" && index !== 0 && (
                   <button
                     type="button"
-                    onClick={() => handleNudge(participant.id)}
-                    disabled={!canNudge(participant) || nudgingId === participant.id}
+                    onClick={() => handleNudge(participant)}
+                    disabled={nudgingId === participant.id}
                     className="brutal-btn brutal-btn-ghost mt-3 w-full text-sm"
                   >
                     {nudgingId === participant.id
                       ? "Sending…"
-                      : nudgedId === participant.id
-                        ? `Nudge sent to ${participant.name}`
-                        : canNudge(participant)
-                          ? `Nudge ${participant.name}`
-                          : "Nudge again tomorrow"}
+                      : canNudge(participant)
+                        ? `Nudge ${participant.name}`
+                        : `Nudge ${participant.name} again`}
                   </button>
                 )}
               </li>
-            );
-          })}
+            ))}
         </ul>
       </div>
+
+      <ShareSheet
+        open={shareTarget !== null}
+        onClose={() => setShareTarget(null)}
+        url={shareTarget?.url ?? ""}
+        text={shareTarget?.text ?? ""}
+        title={shareTarget ? `Nudge ${shareTarget.name}` : "Share link"}
+      />
 
       <div className="sticky bottom-0 border-t-[3px] border-ink bg-card p-4">
         <Link href="/app" className="brutal-btn brutal-btn-primary app-btn-full">

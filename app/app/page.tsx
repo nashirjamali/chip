@@ -1,6 +1,6 @@
 "use client";
 
-import { AppStepIndicator } from "@/app/components/app/AppStepIndicator";
+import { AppBackBar } from "@/app/components/app/AppBackBar";
 import { ReceiptCamera } from "@/app/components/app/ReceiptCamera";
 import { WalletSetup } from "@/app/components/app/WalletSetup";
 import { useChainConfig } from "@/app/components/app/useChainConfig";
@@ -15,7 +15,6 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useMemo, useState } from "react";
 
 type Mode = "start" | "camera" | "review" | "manual";
-type Step = "receive" | "snap" | "details" | "share";
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -29,9 +28,38 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-function personLabel(index: number) {
-  if (index === 0) return "You";
-  return `Friend ${index}`;
+function personLabel(
+  index: number,
+  organizerName: string,
+  friendNames: string[]
+) {
+  if (index === 0) return organizerName.trim() || "You";
+  return friendNames[index - 1]?.trim() || `Friend ${index}`;
+}
+
+function parseFriendNames(input: string) {
+  return input
+    .split(/[\s,]+/)
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
+function friendNamesForCount(input: string, count: number) {
+  if (!Number.isFinite(count) || count < 2) return [];
+  const parsed = parseFriendNames(input);
+  return Array.from({ length: count - 1 }, (_, index) => parsed[index] ?? "");
+}
+
+function buildParticipantNames(
+  count: number,
+  organizerName: string,
+  friendNames: string[]
+) {
+  return Array.from({ length: count }, (_, index) =>
+    index === 0
+      ? organizerName.trim()
+      : friendNames[index - 1]?.trim() || `Friend ${index}`
+  );
 }
 
 export default function CreateSplitPage() {
@@ -44,13 +72,19 @@ export default function CreateSplitPage() {
   const [taxCents, setTaxCents] = useState(0);
   const [tipPercent, setTipPercent] = useState(18);
   const [participantCount, setParticipantCount] = useState("2");
+  const [friendNamesInput, setFriendNamesInput] = useState("");
   const [items, setItems] = useState<ReceiptItem[]>([]);
   const [assignItems, setAssignItems] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [sourceCurrency, setSourceCurrency] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const count = parseInt(participantCount, 10);
+  const friendNames = useMemo(
+    () => friendNamesForCount(friendNamesInput, count),
+    [friendNamesInput, count]
+  );
   const totalCents = Math.round(parseFloat(total) * 100) || 0;
   const subtotalCents = items.reduce((sum, item) => sum + item.priceCents, 0);
   const tipCents = assignItems && items.length > 0
@@ -70,14 +104,6 @@ export default function CreateSplitPage() {
 
   const showReview =
     preview && organizerName.trim().length > 0 && (mode === "review" || mode === "manual");
-
-  const currentStep: Step = !address
-    ? "receive"
-    : showReview
-      ? "share"
-      : mode === "camera" || mode === "start"
-        ? "snap"
-        : "details";
 
   async function handleReceiptSelect(file: File | undefined) {
     if (!file) return;
@@ -110,6 +136,9 @@ export default function CreateSplitPage() {
       setItems(parsedItems);
       setTaxCents(data.taxCents ?? 0);
       setTotal((data.totalCents / 100).toFixed(2));
+      setSourceCurrency(
+        data.currencyCode && data.currencyCode !== "USD" ? data.currencyCode : null
+      );
       setTipPercent(
         data.tipCents && data.totalCents
           ? Math.round((data.tipCents / data.totalCents) * 100)
@@ -121,6 +150,7 @@ export default function CreateSplitPage() {
       setError(
         err instanceof Error ? err.message : "Could not read receipt"
       );
+      setSourceCurrency(null);
       setMode("manual");
     } finally {
       setScanning(false);
@@ -166,6 +196,7 @@ export default function CreateSplitPage() {
         splitMode: assignItems && items.length > 0 ? "items" : "equal",
         items: assignItems ? items : [],
         participantCount: count,
+        participantNames: buildParticipantNames(count, organizerName, friendNames),
         shares: preview?.shares,
       }),
     });
@@ -195,10 +226,20 @@ export default function CreateSplitPage() {
     setMode("start");
   }, []);
 
+  const handleBackToStart = useCallback(() => {
+    setMode("start");
+    setItems([]);
+    setError("");
+  }, []);
+
+  const handleBackHome = useCallback(() => {
+    router.push("/");
+  }, [router]);
+
   if (!address) {
     return (
       <main className="flex flex-1 flex-col">
-        <AppStepIndicator current="receive" walletDone={false} />
+        <AppBackBar onBack={handleBackHome} label="Home" />
         <WalletSetup />
       </main>
     );
@@ -214,47 +255,56 @@ export default function CreateSplitPage() {
         />
       ) : (
         <>
-          <AppStepIndicator current={currentStep} walletDone />
+          {mode === "start" ? (
+            <AppBackBar onBack={handleBackHome} label="Home" />
+          ) : (
+            <AppBackBar onBack={handleBackToStart} />
+          )}
       <div className="flex-1 px-4 py-6">
         {mode === "start" ? (
-          <div className="flex flex-1 flex-col justify-center py-8">
-            <h1 className="mb-1 font-[family-name:var(--font-display)] text-2xl font-extrabold tracking-tight text-ink text-balance">
-              Split the bill
-            </h1>
-            <p className="mb-8 text-sm text-muted text-pretty">
-              Snap a receipt or enter the total — share one link, get paid.
-            </p>
-
-            {chainConfig?.demoPayments && (
-              <p className="app-notice mb-6">
-                Practice mode — payments are simulated until you go live.
+          <div className="flex min-h-[calc(100dvh-11rem)] flex-1 flex-col py-4">
+            <div className="shrink-0">
+              <h1 className="mb-1 font-[family-name:var(--font-display)] text-2xl font-extrabold tracking-tight text-ink text-balance">
+                Split the bill
+              </h1>
+              <p className="mb-6 text-sm text-muted text-pretty">
+                Snap a receipt or enter the total — share one link, get paid.
               </p>
-            )}
 
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={() => setMode("camera")}
-                className="brutal-lg flex w-full flex-col items-center justify-center gap-3 bg-surface-blue px-4 py-10 text-center"
-              >
-                <span className="flex h-16 w-16 items-center justify-center border-[3px] border-ink bg-card">
-                  <svg width="32" height="32" viewBox="0 0 32 32" fill="none" aria-hidden>
-                    <rect x="4" y="8" width="24" height="18" stroke="currentColor" strokeWidth="2.5" />
-                    <circle cx="16" cy="17" r="5" stroke="currentColor" strokeWidth="2.5" />
-                    <path d="M12 8 L14 5 H18 L20 8" stroke="currentColor" strokeWidth="2.5" />
-                  </svg>
-                </span>
-                <span className="font-[family-name:var(--font-display)] text-lg font-bold text-ink">
-                  Scan bill
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("manual")}
-                className="brutal-btn brutal-btn-ghost app-btn-full"
-              >
-                Enter manually
-              </button>
+              {chainConfig?.demoPayments && (
+                <p className="app-notice mb-6">
+                  Practice mode — payments are simulated until you go live.
+                </p>
+              )}
+
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={() => setMode("camera")}
+                  className="brutal-lg flex w-full flex-col items-center justify-center gap-3 bg-surface-blue px-4 py-10 text-center"
+                >
+                  <span className="flex h-16 w-16 items-center justify-center border-[3px] border-ink bg-card">
+                    <svg width="32" height="32" viewBox="0 0 32 32" fill="none" aria-hidden>
+                      <rect x="4" y="8" width="24" height="18" stroke="currentColor" strokeWidth="2.5" />
+                      <circle cx="16" cy="17" r="5" stroke="currentColor" strokeWidth="2.5" />
+                      <path d="M12 8 L14 5 H18 L20 8" stroke="currentColor" strokeWidth="2.5" />
+                    </svg>
+                  </span>
+                  <span className="font-[family-name:var(--font-display)] text-lg font-bold text-ink">
+                    Scan bill
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSourceCurrency(null);
+                    setMode("manual");
+                  }}
+                  className="brutal-btn brutal-btn-ghost app-btn-full"
+                >
+                  Enter manually
+                </button>
+              </div>
             </div>
           </div>
         ) : (
@@ -268,6 +318,12 @@ export default function CreateSplitPage() {
             : "Add the total and headcount."}
         </p>
 
+        {mode === "review" && sourceCurrency && (
+          <p className="app-notice mb-4">
+            Converted from {sourceCurrency} to USD for splitting.
+          </p>
+        )}
+
         {chainConfig?.demoPayments && (
           <p className="app-notice mb-4">
             Practice mode — payments are simulated until you go live.
@@ -275,20 +331,6 @@ export default function CreateSplitPage() {
         )}
 
         <form id="split-form" onSubmit={handleSubmit} className="space-y-5">
-          {(mode === "manual" || mode === "review") && (
-            <button
-              type="button"
-              onClick={() => {
-                setMode("start");
-                setItems([]);
-                setError("");
-              }}
-              className="text-sm font-semibold text-ink underline-offset-4 hover:underline"
-            >
-              ← Back
-            </button>
-          )}
-
           {(mode === "manual" || mode === "review") && (
             <>
               <div>
@@ -311,8 +353,8 @@ export default function CreateSplitPage() {
                 <label htmlFor="total" className="app-label">
                   Bill total
                 </label>
-                <div className="relative">
-                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-semibold text-muted">
+                <div className="app-input-group">
+                  <span className="app-input-group__prefix" aria-hidden>
                     $
                   </span>
                   <input
@@ -321,7 +363,7 @@ export default function CreateSplitPage() {
                     min="0.01"
                     step="0.01"
                     inputMode="decimal"
-                    className="app-input pl-7 tabular-nums"
+                    className="app-input app-input-group__field tabular-nums"
                     value={total}
                     onChange={(e) => setTotal(e.target.value)}
                     placeholder="50.00"
@@ -346,6 +388,23 @@ export default function CreateSplitPage() {
                   required
                 />
               </div>
+
+              {count >= 2 && (
+                <div>
+                  <label htmlFor="friend-names" className="app-label">
+                    Friend names
+                  </label>
+                  <input
+                    id="friend-names"
+                    type="text"
+                    className="app-input"
+                    value={friendNamesInput}
+                    onChange={(e) => setFriendNamesInput(e.target.value)}
+                    placeholder="Alex, Sam or Alex Sam"
+                    autoComplete="off"
+                  />
+                </div>
+              )}
 
               {items.length > 0 && (
                 <>
@@ -381,7 +440,7 @@ export default function CreateSplitPage() {
                                     : ""
                                 }`}
                               >
-                                {personLabel(i)}
+                                {personLabel(i, organizerName, friendNames)}
                               </button>
                             ))}
                           </div>
@@ -410,7 +469,7 @@ export default function CreateSplitPage() {
                     key={index}
                     className="flex items-center justify-between border-[2px] border-ink bg-card px-3 py-2 text-sm"
                   >
-                    <span>{personLabel(index)}</span>
+                    <span>{personLabel(index, organizerName, friendNames)}</span>
                     <span className="font-semibold tabular-nums">
                       {formatUsd(cents)}
                     </span>

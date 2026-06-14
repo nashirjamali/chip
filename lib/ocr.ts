@@ -1,16 +1,37 @@
+import { majorToUsdCents, usdRateFor } from "./currency";
 import type { OcrResult } from "./types";
 
-const OCR_PROMPT = `Extract receipt data as JSON only. Return:
+const OCR_PROMPT = `Extract receipt data as JSON only. Detect the currency from symbols and text (ISO 4217 code, e.g. USD, EUR, IDR, THB, JPY).
+Read amounts exactly as printed on the receipt. Respect local formatting (e.g. 1.234,56 in Europe, 1,234.56 in US, Rp 150.000 in Indonesia).
+Return amounts in the currency's major unit as numbers (not cents): 12.34 for $12.34, 150000 for Rp150.000, 980 for ¥980.
 {
-  "items": [{"name": string, "priceCents": number}],
-  "taxCents": number,
-  "tipCents": number,
-  "totalCents": number
+  "currencyCode": string,
+  "items": [{"name": string, "price": number}],
+  "tax": number,
+  "tip": number,
+  "total": number
 }
-Prices in cents (integer). Include all line items. If tip not shown, use 0.`;
+Include all line items. If tax or tip not shown, use 0.`;
+
+type RawOcrResult = {
+  currencyCode?: string;
+  items?: { name?: string; price?: number; priceCents?: number }[];
+  tax?: number;
+  tip?: number;
+  total?: number;
+  taxCents?: number;
+  tipCents?: number;
+  totalCents?: number;
+};
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
+
+function readMajor(value: number | undefined, legacyCents: number | undefined): number {
+  if (value !== undefined && Number.isFinite(value)) return value;
+  if (legacyCents !== undefined && Number.isFinite(legacyCents)) return legacyCents / 100;
+  return 0;
+}
 
 export async function parseReceiptImage(
   imageBase64: string,
@@ -62,18 +83,28 @@ export async function parseReceiptImage(
     throw new Error("Could not read receipt — try entering the total manually");
   }
 
-  const parsed = JSON.parse(content) as OcrResult;
-  if (!parsed.totalCents || parsed.totalCents <= 0) {
+  const parsed = JSON.parse(content) as RawOcrResult;
+  const currencyCode = (parsed.currencyCode ?? "USD").toUpperCase();
+  const totalMajor = readMajor(parsed.total, parsed.totalCents);
+
+  if (!totalMajor || totalMajor <= 0) {
     throw new Error("Could not find a total on this receipt");
   }
 
+  const items = parsed.items ?? [];
+  const taxMajor = readMajor(parsed.tax, parsed.taxCents);
+  const tipMajor = readMajor(parsed.tip, parsed.tipCents);
+  const rate = await usdRateFor(currencyCode);
+  const toCents = (amount: number) => majorToUsdCents(amount, rate);
+
   return {
-    items: (parsed.items ?? []).map((item) => ({
+    items: items.map((item) => ({
       name: item.name?.trim() || "Item",
-      priceCents: Math.round(item.priceCents),
+      priceCents: toCents(readMajor(item.price, item.priceCents)),
     })),
-    taxCents: Math.round(parsed.taxCents ?? 0),
-    tipCents: Math.round(parsed.tipCents ?? 0),
-    totalCents: Math.round(parsed.totalCents),
+    taxCents: toCents(taxMajor),
+    tipCents: toCents(tipMajor),
+    totalCents: toCents(totalMajor),
+    currencyCode,
   };
 }
