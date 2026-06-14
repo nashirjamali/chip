@@ -63,6 +63,8 @@ Copy `.env.example` to `.env.local` for local dev.
 | `CHIP_DEMO_PAYMENTS` | No | `true` skips on-chain USDC (good for local dev) |
 | `SEPOLIA_RPC_URL` | No | Server-side Sepolia RPC |
 | `NEXT_PUBLIC_SEPOLIA_RPC_URL` | No | Client-side Sepolia RPC (baked in at build time) |
+| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | For mobile | Reown/WalletConnect project ID for mobile wallets |
+| `NEXT_PUBLIC_SITE_URL` | No | Public site URL for WalletConnect metadata |
 | `SEPOLIA_USDC_ADDRESS` | No | USDC contract on Sepolia |
 
 Without `OPENROUTER_API_KEY`, receipt OCR won't work — manual entry still does.

@@ -196,8 +196,8 @@ function PayPageContent() {
             ) : (
               <>
                 <p className="m-0 text-sm text-muted text-pretty">
-                  Connect a wallet before paying. MetaMask, Coinbase Wallet, and
-                  other browser wallets work here.
+                  Tap connect and choose your wallet app — MetaMask, Coinbase
+                  Wallet, Rainbow, and others work on mobile.
                 </p>
                 <div className="mt-4">
                   <WalletButton

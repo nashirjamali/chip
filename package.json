@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.0",
+    "@walletconnect/ethereum-provider": "^2.23.9",
     "better-sqlite3": "^12.10.1",
     "drizzle-orm": "^0.45.2",
     "next": "16.2.9",
