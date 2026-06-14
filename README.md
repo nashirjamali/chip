@@ -1,36 +1,93 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Chip
 
-## Getting Started
+Snap a bill, split it, share a link — friends pay their share in USDC. Mobile-first Next.js app with receipt OCR, per-person payment links, and real-time tracking.
 
-First, run the development server:
+## Features
+
+- Receipt photo OCR or manual bill entry
+- Equal split or per-item assignment
+- Custom friend names
+- Share links via WhatsApp, Telegram, or QR (per friend)
+- Sepolia USDC payments with wallet connect
+- Live paid/pending tracking for the organizer
+
+## Screenshots
+
+Add images to [`docs/screenshots/`](./docs/screenshots/).
+
+| Create split | Receipt scan |
+| --- | --- |
+| ![Create split](./docs/screenshots/create-split.png) | ![Receipt scan](./docs/screenshots/receipt-scan.png) |
+
+| Review & share | Track payments |
+| --- | --- |
+| ![Review and share](./docs/screenshots/review-share.png) | ![Track payments](./docs/screenshots/track-payments.png) |
+
+| Pay page | Nudge & share |
+| --- | --- |
+| ![Pay page](./docs/screenshots/pay-page.png) | ![Nudge and share](./docs/screenshots/nudge-share.png) |
+
+Suggested filenames:
+
+- `create-split.png` — start screen / connect wallet
+- `receipt-scan.png` — camera or manual entry
+- `review-share.png` — bill details, friend names, review
+- `track-payments.png` — who's paid list
+- `pay-page.png` — friend connect wallet and pay
+- `nudge-share.png` — WhatsApp, Telegram, QR share sheet
+
+## Requirements
+
+- Node.js 20+
+- pnpm (recommended)
+
+## Local development
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
+cp .env.example .env.local
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Environment variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Copy `.env.example` to `.env.local` for local dev.
 
-## Learn More
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENROUTER_API_KEY` | For OCR | OpenRouter API key for receipt scanning |
+| `OPENROUTER_MODEL` | No | Vision model (default: `openai/gpt-4o-mini`) |
+| `OPENROUTER_SITE_URL` | No | Sent to OpenRouter as HTTP-Referer |
+| `CHIP_DEMO_PAYMENTS` | No | `true` skips on-chain USDC (good for local dev) |
+| `SEPOLIA_RPC_URL` | No | Server-side Sepolia RPC |
+| `NEXT_PUBLIC_SEPOLIA_RPC_URL` | No | Client-side Sepolia RPC (baked in at build time) |
+| `SEPOLIA_USDC_ADDRESS` | No | USDC contract on Sepolia |
 
-To learn more about Next.js, take a look at the following resources:
+Without `OPENROUTER_API_KEY`, receipt OCR won't work — manual entry still does.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Scripts
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+pnpm dev      # development server
+pnpm build    # production build
+pnpm start    # run production build
+pnpm lint     # eslint
+```
 
-## Deploy on Vercel
+## Project structure
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```
+app/
+  app/          # create split flow (/app)
+  s/[id]/       # friend pay page
+  s/[id]/track/ # organizer tracking
+  api/          # splits, OCR, payments
+lib/            # split logic, OCR, chain, storage
+data/           # local split storage (gitignored)
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Product spec
+
+See [PRODUCT.md](./PRODUCT.md) for full product requirements and architecture notes.

@@ -1,0 +1,56 @@
+services:
+  traefik:
+    image: traefik:v3.3
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - letsencrypt:/letsencrypt
+    networks:
+      - web
+
+  chip:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_SEPOLIA_RPC_URL: ${NEXT_PUBLIC_SEPOLIA_RPC_URL:-https://rpc.sepolia.org}
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - chip-data:/app/data
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=chip_web
+      - traefik.http.routers.chip.rule=Host(`${DOMAIN}`)
+      - traefik.http.routers.chip.entrypoints=websecure
+      - traefik.http.routers.chip.tls=true
+      - traefik.http.routers.chip.tls.certresolver=letsencrypt
+      - traefik.http.routers.chip.service=chip
+      - traefik.http.routers.chip-http.rule=Host(`${DOMAIN}`)
+      - traefik.http.routers.chip-http.entrypoints=web
+      - traefik.http.routers.chip-http.middlewares=chip-redirect
+      - traefik.http.routers.chip-http.service=chip
+      - traefik.http.middlewares.chip-redirect.redirectscheme.scheme=https
+      - traefik.http.middlewares.chip-redirect.redirectscheme.permanent=true
+      - traefik.http.services.chip.loadbalancer.server.port=3000
+    networks:
+      - web
+
+networks:
+  web:
+    name: chip_web
+
+volumes:
+  letsencrypt:
+  chip-data:
